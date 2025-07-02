@@ -28,6 +28,7 @@ import java.net.URI
 import android.util.Log
 import android.text.TextUtils
 import com.microsoft.cognitiveservices.speech.*
+import com.microsoft.cognitiveservices.speech.transcription.*
 
 import java.util.concurrent.Semaphore
 
@@ -37,7 +38,9 @@ class AzureSpeechRecognitionPlugin : FlutterPlugin, Activity(), MethodCallHandle
     private lateinit var azureChannel: MethodChannel
     private lateinit var handler: Handler
     var continuousListeningStarted: Boolean = false
+    var transcriberStarted: Boolean = false
     lateinit var reco: SpeechRecognizer
+    lateinit var conversationTranscriber: com.microsoft.cognitiveservices.speech.transcription.ConversationTranscriber
     lateinit var task_global: Future<SpeechRecognitionResult>
 
     override fun onAttachedToEngine(@NonNull flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
@@ -125,6 +128,16 @@ class AzureSpeechRecognitionPlugin : FlutterPlugin, Activity(), MethodCallHandle
                     lang,
                     nBestPhonemeCount,
                 )
+                result.success(true)
+            }
+
+            "startTranscriber" -> {
+                startTranscriber(speechSubscriptionKey, serviceRegion, lang)
+                result.success(true)
+            }
+
+            "stopTranscriber" -> {
+                stopTranscriber()
                 result.success(true)
             }
 
@@ -431,6 +444,71 @@ class AzureSpeechRecognitionPlugin : FlutterPlugin, Activity(), MethodCallHandle
         } catch (exec: Exception) {
             assert(false)
             invokeMethod("speech.onException", "Exception: " + exec.message)
+        }
+    }
+
+    private fun startTranscriber(
+        speechSubscriptionKey: String,
+        serviceRegion: String,
+        lang: String,
+    ) {
+        val logTag = "startTranscriber"
+        Log.i(logTag, "Transcriber started: $transcriberStarted")
+
+        if (transcriberStarted) {
+            val stopTask = conversationTranscriber.stopTranscribingAsync()
+            setOnTaskCompletedListener(stopTask) {
+                transcriberStarted = false
+                invokeMethod("speech.onRecognitionStopped", null)
+                conversationTranscriber.close()
+            }
+            return
+        }
+
+        try {
+            val audioConfig = AudioConfig.fromDefaultMicrophoneInput()
+            val config = SpeechConfig.fromSubscription(speechSubscriptionKey, serviceRegion)
+            config.speechRecognitionLanguage = lang
+
+            conversationTranscriber = ConversationTranscriber(config, audioConfig)
+
+            conversationTranscriber.transcribing.addEventListener { _, args ->
+                val text = args.result.text
+                val speaker = args.result.speakerId
+                val map = HashMap<String, String>()
+                map["text"] = text
+                map["speakerId"] = speaker
+                invokeMethod("speech.onDiarization", map)
+            }
+
+            conversationTranscriber.transcribed.addEventListener { _, args ->
+                val text = args.result.text
+                val speaker = args.result.speakerId
+                val map = HashMap<String, String>()
+                map["text"] = text
+                map["speakerId"] = speaker
+                invokeMethod("speech.onFinalResponse", text)
+                invokeMethod("speech.onDiarization", map)
+            }
+
+            val startTask = conversationTranscriber.startTranscribingAsync()
+            setOnTaskCompletedListener(startTask) {
+                transcriberStarted = true
+                invokeMethod("speech.onRecognitionStarted", null)
+            }
+        } catch (ex: Exception) {
+            invokeMethod("speech.onException", "Exception: " + ex.message)
+        }
+    }
+
+    private fun stopTranscriber() {
+        if (transcriberStarted) {
+            val stopTask = conversationTranscriber.stopTranscribingAsync()
+            setOnTaskCompletedListener(stopTask) {
+                transcriberStarted = false
+                invokeMethod("speech.onRecognitionStopped", null)
+                conversationTranscriber.close()
+            }
         }
     }
 
