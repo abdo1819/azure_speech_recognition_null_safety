@@ -59,6 +59,18 @@ __Warning__: You must always stop the recognition manually to avoid memory leaks
 AzureSpeechRecognition.continuousRecording();
 ```
 
+### Conversation Transcription with Speaker Diarization
+
+Use the Azure Speech transcriber to obtain speaker separated transcripts.
+
+```dart
+// Start transcribing from the microphone
+AzureSpeechRecognition.startTranscriber();
+
+// Stop when done
+await AzureSpeechRecognition.stopTranscriber();
+```
+
 ## Example program
 
 See the `example/` folder for a complete Flutter application.

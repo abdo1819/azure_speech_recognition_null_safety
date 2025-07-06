@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/services.dart';
 
 typedef void StringResultHandler(String text);
+typedef void DiarizationResultHandler(String speakerId, String text);
 
 class AzureSpeechRecognition {
   static const MethodChannel _channel =
@@ -49,6 +50,7 @@ class AzureSpeechRecognition {
   StringResultHandler? recognitionResultHandler;
   StringResultHandler? finalTranscriptionHandler;
   StringResultHandler? assessmentResultHandler;
+  DiarizationResultHandler? diarizationResultHandler;
   VoidCallback? recognitionStartedHandler;
   VoidCallback? startRecognitionHandler;
   VoidCallback? recognitionStoppedHandler;
@@ -66,6 +68,12 @@ class AzureSpeechRecognition {
         break;
       case "speech.onAssessmentResult":
         assessmentResultHandler!(call.arguments);
+        break;
+      case "speech.onDiarization":
+        if (call.arguments is Map) {
+          final args = Map<String, dynamic>.from(call.arguments);
+          diarizationResultHandler?.call(args['speakerId'] ?? '', args['text'] ?? '');
+        }
         break;
       case "speech.onStartAvailable":
         startRecognitionHandler!();
@@ -91,6 +99,9 @@ class AzureSpeechRecognition {
 
   void setAssessmentResult(StringResultHandler handler) =>
       assessmentResultHandler = handler;
+
+  void setDiarizationResultHandler(DiarizationResultHandler handler) =>
+      diarizationResultHandler = handler;
 
   /// called when an exception occur
   void onExceptionHandler(StringResultHandler handler) =>
@@ -189,5 +200,21 @@ class AzureSpeechRecognition {
 
   static Future<void> stopContinuousRecognition() async {
     await _channel.invokeMethod('stopContinuousStream');
+  }
+
+  static void startTranscriber() {
+    if (_subKey != null && _region != null) {
+      _channel.invokeMethod('startTranscriber', {
+        'language': _lang,
+        'subscriptionKey': _subKey,
+        'region': _region
+      });
+    } else {
+      throw "Error: SpeechRecognitionParameters not initialized correctly";
+    }
+  }
+
+  static Future<void> stopTranscriber() async {
+    await _channel.invokeMethod('stopTranscriber');
   }
 }

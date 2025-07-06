@@ -14,6 +14,8 @@ public class SwiftAzureSpeechRecognitionPlugin: NSObject, FlutterPlugin {
     var azureChannel: FlutterMethodChannel
     var continousListeningStarted: Bool = false
     var continousSpeechRecognizer: SPXSpeechRecognizer? = nil
+    var transcriberStarted: Bool = false
+    var conversationTranscriber: SPXConversationTranscriber?
     var simpleRecognitionTasks: Dictionary<String, SimpleRecognitionTask> = [:]
     
     public static func register(with registrar: FlutterPluginRegistrar) {
@@ -68,6 +70,15 @@ public class SwiftAzureSpeechRecognitionPlugin: NSObject, FlutterPlugin {
         else if (call.method == "continuousStreamWithAssessment") {
             print("Called continuousStreamWithAssessment")
             continuousStreamWithAssessment(referenceText: referenceText, phonemeAlphabet: phonemeAlphabet,  granularity: granularity, enableMiscue: enableMiscue, speechSubscriptionKey: speechSubscriptionKey, serviceRegion: serviceRegion, lang: lang, nBestPhonemeCount: nBestPhonemeCount)
+            result(true)
+        }
+        else if (call.method == "startTranscriber") {
+            print("Called startTranscriber")
+            startTranscriber(speechSubscriptionKey: speechSubscriptionKey, serviceRegion: serviceRegion, lang: lang)
+            result(true)
+        }
+        else if (call.method == "stopTranscriber") {
+            stopTranscriber()
             result(true)
         }
         else if (call.method == "stopContinuousStream") {
@@ -345,6 +356,57 @@ public class SwiftAzureSpeechRecognitionPlugin: NSObject, FlutterPlugin {
             }
             catch {
                 print("An unexpected error occurred: \(error)")
+            }
+        }
+    }
+
+    private func startTranscriber(speechSubscriptionKey : String, serviceRegion : String, lang: String) {
+        if (transcriberStarted) {
+            stopTranscriber()
+            return
+        }
+        do {
+            let audioSession = AVAudioSession.sharedInstance()
+            try audioSession.setCategory(AVAudioSession.Category.record, mode: AVAudioSession.Mode.default, options: AVAudioSession.CategoryOptions.allowBluetooth)
+            try audioSession.setActive(true)
+
+            let speechConfig = try SPXSpeechConfiguration(subscription: speechSubscriptionKey, region: serviceRegion)
+            speechConfig.speechRecognitionLanguage = lang
+            let audioConfig = SPXAudioConfiguration()
+            conversationTranscriber = try SPXConversationTranscriber(speechConfiguration: speechConfig, audioConfiguration: audioConfig)
+
+            conversationTranscriber!.addTranscribingEventHandler { _, evt in
+                let res = evt.result
+                let map : [String:String] = ["speakerId": res.speakerId ?? "", "text": res.text ?? ""]
+                self.azureChannel.invokeMethod("speech.onDiarization", arguments: map)
+            }
+
+            conversationTranscriber!.addTranscribedEventHandler { _, evt in
+                let res = evt.result
+                let map : [String:String] = ["speakerId": res.speakerId ?? "", "text": res.text ?? ""]
+                self.azureChannel.invokeMethod("speech.onFinalResponse", arguments: res.text)
+                self.azureChannel.invokeMethod("speech.onDiarization", arguments: map)
+            }
+
+            try conversationTranscriber!.startTranscribing()
+            self.azureChannel.invokeMethod("speech.onRecognitionStarted", arguments: nil)
+            transcriberStarted = true
+        }
+        catch {
+            self.azureChannel.invokeMethod("speech.onException", arguments: "Exception: \(error)")
+        }
+    }
+
+    private func stopTranscriber() {
+        if (transcriberStarted) {
+            do {
+                try conversationTranscriber!.stopTranscribing()
+                self.azureChannel.invokeMethod("speech.onRecognitionStopped", arguments: nil)
+                conversationTranscriber = nil
+                transcriberStarted = false
+            }
+            catch {
+                print("Error occurred stopping transcriber")
             }
         }
     }
